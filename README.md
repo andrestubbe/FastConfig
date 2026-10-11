@@ -52,6 +52,39 @@ public class Demo {
 
 ---
 
+## Table of Contents
+
+- [Why FastConfig?](#why-fastconfig)
+- [Key Features](#key-features)
+- [Configuration File Format](#configuration-file-format)
+- [API Quick Reference](#api-quick-reference)
+- [Installation](#installation)
+- [Platform Support](#platform-support)
+- [License](#license)
+- [Related Projects](#related-projects)
+
+---
+
+## Why FastConfig?
+
+Most Java configuration libraries force developers into bloated dependencies (Jackson, SnakeYAML, Apache Commons Configuration, or heavy Spring context engines), messy scalar string maps, or unencrypted on-disk secrets. `FastConfig` provides:
+
+- **100% Zero-Bloat Architecture** — Pure Java 17+ core powered by `FastFileFormat`, with no external third-party framework overhead.
+- **Section-Aware Dot Key Notation** — Seamlessly navigate and store properties using natural dot notation (`audio.volume` automatically organizes into `[Audio] volume = 0.85`).
+- **Hardware-Level DPAPI Secret Security** — Transparently encrypts sensitive API tokens and passwords directly on-disk via Windows DPAPI (`FastKeychain`), preventing plain-text token leaks in source trees and dotfiles.
+- **Crash-Proof Atomic Persistence** — Replaces fragile direct file writes with atomic file renames (`ATOMIC_MOVE`), eliminating partial-write file corruption during sudden system shutdowns.
+- **Thread-Safe High-Throughput Access** — Protected by fine-grained `ReentrantReadWriteLock` for zero lock contention during hot-path reads.
+
+| Feature | Java Properties / Preferences | Apache Commons / Typesafe Config | FastConfig |
+|:---|:---|:---|:---|
+| **Secret Encryption** | None (Plaintext on disk) | Manual wrapper / plugin | **Native Windows DPAPI (`enc:<token>`)** |
+| **Section Organization**| Flat scalar keys only | Heavy hierarchical trees | **Natural section-aware dot keys** |
+| **File Format** | Clunky `.properties` / XML | Complex HOCON / YAML / JSON | **Clean human-readable `.format`** |
+| **Write Reliability** | Truncating direct streams | Non-atomic stream writes | **Guaranteed `ATOMIC_MOVE` replacements** |
+| **Dependencies** | JDK built-in | Heavy multi-JAR ecosystems | **Pure lightweight FastJava stack** |
+
+---
+
 ## Key Features
 
 * **📁 Automatic App Directory Discovery** — `FastConfig.app("name")` automatically targets `~/.<name>/config.format` across platforms.
