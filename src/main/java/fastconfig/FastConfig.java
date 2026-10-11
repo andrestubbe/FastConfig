@@ -5,19 +5,23 @@ import fastfileformat.TextFormatParser;
 import fastfileformat.TextFormatWriter;
 
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+
+import static java.nio.file.StandardOpenOption.*;
 
 /**
  * Universal High-Performance Application Configuration Engine for FastJava.
  * Supports:
  * - Direct app home directories (e.g. {@code ~/.speak/config.format})
  * - Section-aware dot keys (e.g. {@code "chunking.maxTokens"} -> {@code [Chunking] maxTokens = 150})
- * - Atomic saves & optional auto-save
+ * - Hardware DPAPI encryption for secrets without plaintext fallbacks
+ * - Atomic fsynced saves & optional auto-save
  * - Thread-safety via {@link ReentrantReadWriteLock}
  * - Typed getters with guaranteed defaults
  */
@@ -45,7 +49,7 @@ public final class FastConfig {
         if (appName == null || appName.isBlank()) {
             throw new IllegalArgumentException("appName must not be blank");
         }
-        String cleanName = appName.trim().toLowerCase();
+        String cleanName = appName.trim().toLowerCase(Locale.ROOT);
         if (cleanName.startsWith(".")) {
             cleanName = cleanName.substring(1);
         }
@@ -65,22 +69,24 @@ public final class FastConfig {
     }
 
     /**
-     * Reloads configuration from disk.
+     * Reloads configuration safely from disk without clearing existing state on read failure.
      */
     public FastConfig load() {
         lock.writeLock().lock();
         try {
-            data.clear();
             if (Files.exists(configPath)) {
-                String text = Files.readString(configPath);
+                String text = Files.readString(configPath, StandardCharsets.UTF_8);
                 TextFormatParser parser = FastFileFormat.parseText(text);
 
-                // Populate from all parsed entries
+                Map<String, Map<String, String>> parsed = new LinkedHashMap<>();
                 for (Map.Entry<String, String> entry : parser.getAll().entrySet()) {
                     String fullKey = entry.getKey();
                     KeyRef ref = resolveKey(fullKey);
-                    data.computeIfAbsent(ref.section, k -> new LinkedHashMap<>()).put(ref.subKey, entry.getValue());
+                    parsed.computeIfAbsent(ref.section, k -> new LinkedHashMap<>()).put(ref.subKey, entry.getValue());
                 }
+
+                data.clear();
+                data.putAll(parsed);
             }
             return this;
         } catch (IOException e) {
@@ -92,7 +98,7 @@ public final class FastConfig {
     }
 
     /**
-     * Writes configuration to disk safely.
+     * Writes configuration to disk atomically with fsync and cross-filesystem fallback.
      */
     public FastConfig save() {
         lock.writeLock().lock();
@@ -115,14 +121,24 @@ public final class FastConfig {
                 }
             }
 
-            // Atomic file write using temporary file
-            Path temp = configPath.resolveSibling(configPath.getFileName().toString() + ".tmp");
-            Files.writeString(temp, writer.toText());
-            Files.move(temp, configPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            byte[] bytes = writer.toText().getBytes(StandardCharsets.UTF_8);
+            Path temp = configPath.resolveSibling(configPath.getFileName().toString() + ".tmp." + UUID.randomUUID().toString().substring(0, 8));
+
+            // Write and sync to physical media
+            try (FileChannel channel = FileChannel.open(temp, CREATE, WRITE, TRUNCATE_EXISTING)) {
+                channel.write(ByteBuffer.wrap(bytes));
+                channel.force(true);
+            }
+
+            // Atomic move with fallback if ATOMIC_MOVE is unsupported on target filesystem
+            try {
+                Files.move(temp, configPath, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp, configPath, StandardCopyOption.REPLACE_EXISTING);
+            }
             return this;
         } catch (IOException e) {
-            System.err.println("[FastConfig] Failed to save " + configPath + ": " + e.getMessage());
-            return this;
+            throw new RuntimeException("[FastConfig] Failed to persist " + configPath + ": " + e.getMessage(), e);
         } finally {
             lock.writeLock().unlock();
         }
@@ -186,18 +202,26 @@ public final class FastConfig {
     public boolean getBoolean(String key, boolean defaultValue) {
         String val = getString(key, null);
         if (val == null) return defaultValue;
-        String trimmed = val.trim().toLowerCase();
-        return trimmed.equals("true") || trimmed.equals("yes") || trimmed.equals("1") || trimmed.equals("on");
+        String trimmed = val.trim().toLowerCase(Locale.ROOT);
+        return switch (trimmed) {
+            case "true", "yes", "1", "on" -> true;
+            case "false", "no", "0", "off" -> false;
+            default -> defaultValue;
+        };
     }
 
     public <E extends Enum<E>> E getEnum(String key, Class<E> enumClass, E defaultValue) {
+        if (enumClass == null) return defaultValue;
         String val = getString(key, null);
-        if (val == null) return defaultValue;
-        try {
-            return Enum.valueOf(enumClass, val.trim().toUpperCase());
-        } catch (Exception e) {
-            return defaultValue;
+        if (val == null || val.isBlank()) return defaultValue;
+
+        String clean = val.trim().replace('-', '_').replace(' ', '_');
+        for (E constant : enumClass.getEnumConstants()) {
+            if (constant.name().equalsIgnoreCase(clean)) {
+                return constant;
+            }
         }
+        return defaultValue;
     }
 
     /**
@@ -220,12 +244,12 @@ public final class FastConfig {
                 return defaultValue;
             }
         }
-        // Fallback: plaintext token
-        return raw;
+        return defaultValue;
     }
 
     /**
      * Stores a secret value securely by encrypting it via Windows DPAPI / FastKeychain before writing.
+     * Hard fails on encryption failure to guarantee no plaintext leakage.
      *
      * @param key   Configuration key.
      * @param value Plaintext secret to encrypt.
@@ -234,16 +258,12 @@ public final class FastConfig {
         if (value == null || value.isBlank()) {
             return set(key, "");
         }
-        try {
-            byte[] cipher = fastkeychain.FastKeychain.protectString(value);
-            if (cipher != null && cipher.length > 0) {
-                String encoded = "enc:" + Base64.getEncoder().encodeToString(cipher);
-                return set(key, encoded);
-            }
-        } catch (Exception e) {
-            System.err.println("[FastConfig] Failed to encrypt secret '" + key + "': " + e.getMessage());
+        byte[] cipher = fastkeychain.FastKeychain.protectString(value);
+        if (cipher == null || cipher.length == 0) {
+            throw new IllegalStateException("DPAPI secret encryption failed for key '" + key + "'. Aborting to prevent plaintext leakage.");
         }
-        return set(key, value);
+        String encoded = "enc:" + Base64.getEncoder().encodeToString(cipher);
+        return set(key, encoded);
     }
 
     // --- Setters ---
@@ -292,6 +312,26 @@ public final class FastConfig {
         return this;
     }
 
+    public Map<String, String> getAll(String section) {
+        lock.readLock().lock();
+        try {
+            String secName = capitalize(section);
+            Map<String, String> sec = data.get(secName);
+            return sec != null ? Collections.unmodifiableMap(new LinkedHashMap<>(sec)) : Collections.emptyMap();
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
+    public Set<String> getSections() {
+        lock.readLock().lock();
+        try {
+            return Collections.unmodifiableSet(new LinkedHashSet<>(data.keySet()));
+        } finally {
+            lock.readLock().unlock();
+        }
+    }
+
     private String getRaw(String key) {
         KeyRef ref = resolveKey(key);
         Map<String, String> sec = data.get(ref.section);
@@ -300,15 +340,10 @@ public final class FastConfig {
         }
         // Fallback: search in default section
         Map<String, String> gen = data.get("General");
-        if (gen != null && gen.containsKey(key)) {
-            return gen.get(key);
+        if (gen != null && gen.containsKey(ref.subKey)) {
+            return gen.get(ref.subKey);
         }
         return null;
-    }
-
-    private static String normalizeSection(String sec) {
-        if (sec == null || sec.isBlank()) return "General";
-        return sec.trim();
     }
 
     private static KeyRef resolveKey(String key) {
@@ -323,7 +358,7 @@ public final class FastConfig {
     }
 
     private static String capitalize(String str) {
-        if (str.isEmpty()) return str;
+        if (str == null || str.isEmpty()) return "General";
         return Character.toUpperCase(str.charAt(0)) + str.substring(1);
     }
 

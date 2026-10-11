@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 public class FastConfigTest {
 
-    enum DemoMode { SIMPLE, ADVANCED }
+    enum DemoMode { SIMPLE, ADVANCED, HYPHEN_CASE }
 
     @Test
     void testBasicPropertiesAndAutoSave(@TempDir Path tempDir) {
@@ -63,5 +63,22 @@ public class FastConfigTest {
 
         // Verify transparent unprotect
         assertEquals(secretKey, fresh.getSecret("keys.elevenlabs", null));
+    }
+
+    @Test
+    void testBooleanAndEnumHardening(@TempDir Path tempDir) {
+        Path cfgPath = tempDir.resolve("types.format");
+        FastConfig cfg = FastConfig.file(cfgPath);
+
+        cfg.set("bool.on", "on");
+        cfg.set("bool.off", "off");
+        cfg.set("bool.invalid", "maybe");
+
+        assertTrue(cfg.getBoolean("bool.on", false));
+        assertFalse(cfg.getBoolean("bool.off", true));
+        assertTrue(cfg.getBoolean("bool.invalid", true)); // Returns default on invalid string
+
+        cfg.set("mode.hyphen", "hyphen-case");
+        assertEquals(DemoMode.HYPHEN_CASE, cfg.getEnum("mode.hyphen", DemoMode.class, DemoMode.SIMPLE));
     }
 }
