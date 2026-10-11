@@ -136,6 +136,13 @@ public FastConfig remove(String key)
 ```
 Removes a property. Automatically triggers `save()` if `autoSave` is active.
 
+#### `clear()`
+```java
+public FastConfig clear()
+```
+Clears all in-memory configuration entries across all sections. Automatically triggers `save()` if `autoSave` is active.
+- **Returns:** `this` for fluent chaining.
+
 ---
 
 ### Inspection Methods

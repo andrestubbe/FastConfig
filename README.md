@@ -58,8 +58,8 @@ public class Demo {
 - [Key Features](#key-features)
 - [Configuration File Format](#configuration-file-format)
 - [API Quick Reference](#api-quick-reference)
-- [Documentation & Guides](#documentation--guides)
 - [Installation](#installation)
+- [Documentation](#documentation)
 - [Platform Support](#platform-support)
 - [License](#license)
 - [Related Projects](#related-projects)
@@ -138,21 +138,12 @@ elevenlabs = enc:AQAAANCMnd8BFdERjHoAwE/Cl+sBAAAA...
 | `set(String key, Object val)` | `FastConfig` | Stores key-value pair, mapping dot-notation to sections. |
 | `has(String key)` | `boolean` | Checks if key exists. |
 | `remove(String key)` | `FastConfig` | Removes key from its section. |
+| `clear()` | `FastConfig` | Clears all configuration keys across all sections. |
 | `getAll(String section)` | `Map<String, String>` | Returns snapshot of all keys and values in a section. |
 | `getSections()` | `Set<String>` | Returns set of all registered section names. |
 | `autoSave(boolean enable)` | `FastConfig` | Toggles automatic disk flush on every `set` / `remove`. |
 | `save()` | `FastConfig` | Flushes data to disk atomically with fsync. |
 | `load()` | `FastConfig` | Re-reads configuration file from disk. |
-
----
-
-## Documentation & Guides
-
-Detailed architecture, design philosophy, and method contracts:
-
-* 📖 **[API Reference](docs/REFERENCE.md)** — Complete method parameters, contracts, and error handling.
-* 📋 **[Changelog](docs/CHANGELOG.md)** — Release notes and version history.
-* 🏛️ **[Philosophy](docs/PHILOSOPHY.md)** — Core design principles behind the zero-bloat FastJava architecture.
 
 ---
 
@@ -215,6 +206,16 @@ dependencies {
     implementation 'com.github.andrestubbe:FastCore:0.1.0'
 }
 ```
+
+---
+
+## Documentation
+
+- **[REFERENCE.md](docs/REFERENCE.md)**: Exhaustive catalog of API contracts, persistence lifecycle, and security guarantees.
+- **[PHILOSOPHY.md](docs/PHILOSOPHY.md)**: Zero-bloat, hardened secret protection, and crash-proof atomic persistence rationale.
+- **[ROADMAP.md](docs/ROADMAP.md)**: Planned milestone features, hot reload, and cross-platform security extensions.
+- **[CHANGELOG.md](docs/CHANGELOG.md)**: Version history and release notes.
+- **[COMPILE.md](docs/COMPILE.md)**: Full compilation guide (Maven build workflow and tests).
 
 ---
 

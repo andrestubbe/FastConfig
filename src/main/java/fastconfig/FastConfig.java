@@ -312,6 +312,19 @@ public final class FastConfig {
         return this;
     }
 
+    public FastConfig clear() {
+        lock.writeLock().lock();
+        try {
+            data.clear();
+        } finally {
+            lock.writeLock().unlock();
+        }
+        if (autoSave) {
+            save();
+        }
+        return this;
+    }
+
     public Map<String, String> getAll(String section) {
         lock.readLock().lock();
         try {
